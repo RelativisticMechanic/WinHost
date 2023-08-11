@@ -86,6 +86,11 @@ typedef enum
     HTTP_POST,
     HTTP_PUT,
     HTTP_DELETE,
+    HTTP_HEAD,
+    HTTP_CONNECT,
+    HTTP_OPTIONS,
+    HTTP_TRACE,
+    HTTP_PATCH,
     HTTP_UNKNOWN
 } HTTPRequestMethod;
 
@@ -205,7 +210,12 @@ public:
         { "GET", HTTP_GET },
         { "POST", HTTP_POST },
         { "PUT", HTTP_PUT },
-        { "DELETE", HTTP_DELETE }
+        { "DELETE", HTTP_DELETE },
+        { "HEAD", HTTP_HEAD },
+        { "CONNECT", HTTP_CONNECT },
+        { "OPTIONS", HTTP_OPTIONS },
+        { "TRACE", HTTP_TRACE },
+        { "PATCH", HTTP_PATCH }
     };
 
     std::map<HTTPRequestMethod, std::string> str_from_method_map = {
@@ -213,6 +223,11 @@ public:
         { HTTP_POST, "POST" },
         { HTTP_PUT, "PUT" },
         { HTTP_DELETE, "DELETE" },
+        { HTTP_HEAD, "HEAD" },
+        { HTTP_CONNECT, "CONNECT" },
+        { HTTP_OPTIONS, "OPTIONS" },
+        { HTTP_TRACE, "TRACE" },
+        { HTTP_PATCH, "PATCH" },
         { HTTP_UNKNOWN, "UNKNOWN" }
     };
 
@@ -327,7 +342,7 @@ public:
     void Listen(HTTPCallBack callback)
     {
 
-        std::cout << "[NOTIFY] WinHost is listening on: http://localhost:" << this->port << std::endl;
+        std::cout << "[NOTIFY] WinHost is listening on: \x1B[7mhttp://localhost:" << this->port << "\x1B[27m" << std::endl;
         /* Get IP on local network */
         char ipbuf[1024];
         if(gethostname(ipbuf, sizeof(ipbuf)) == SOCKET_ERROR)
@@ -346,7 +361,7 @@ public:
         {
             struct in_addr addr;
             memcpy(&addr, host_entries->h_addr_list[i], sizeof(struct in_addr));
-            std::cout << "[NOTIFY] Alternatively, http://" << inet_ntoa(addr) << ":" << this->port << std::endl;
+            std::cout << "[NOTIFY] Alternatively, \x1B[7mhttp://" << inet_ntoa(addr) << ":" << this->port << "\x1B[27m"<< std::endl;
         }
         
         std::cout << "\x1B[33m*** Hit ^C (CTRL+C) to stop hosting anytime. ***\x1B[39m" << std::endl;
@@ -356,14 +371,16 @@ public:
             char reply[MAX_REQUEST_SIZE] = { 0 };
             recv(client, reply, sizeof(reply), NULL);
             HTTPRequest request = HTTPRequest((const char*)&reply);
-            request.Display();
+            if(request.method != HTTP_UNKNOWN)
+                request.Display();
 
             if (client == SOCKET_ERROR)
             {
                 std::cerr << "[ERROR] Accept Failed! WS2_Error_Code: " << WSAGetLastError() << std::endl;
                 WinHostQuit(-1);
             }
-            else
+            
+            if(request.method != HTTP_UNKNOWN)
             {
                 HTTPResponse response = ResponseWinHostDefault;
                 if (callback)
@@ -415,7 +432,7 @@ std::string PrintfToString(std::string format, ...)
 HTTPResponse SimpleHTTPServer(HTTPRequest request)
 {
     /* Only GET requests sir. */
-    if(request.method != HTTP_GET)
+    if(request.method != HTTP_GET && request.method != HTTP_HEAD)
     {
         return ResponseUnsupportedMethod;
     }
@@ -455,6 +472,10 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
         return ResponseNotFound;
     }
 
+    /* If HEAD, now is the time to return an OK */
+    if(request.method == HTTP_HEAD)
+        return HTTPResponse(200, HTTP_HTML, "");
+
     /* If binary read into a binary buffer */
     if (type & HTTP_FILE_BINARY)
     {
@@ -491,7 +512,7 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
             std::string html_output_before = "<!DOCTYPE html>"
                                             "<html>"
                                             "<head>"
-                                            "<meta \"charset\"=\"UTF-8\""
+                                            "<meta charset=\"UTF-8\""
                                             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
                                             "<title>" + request.path + "</title>"
                                             /* Include GitHub's markdown */
