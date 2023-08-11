@@ -34,6 +34,7 @@ typedef enum
     HTTP_IMAGE_PNG = 6 | HTTP_FILE_BINARY,
     HTTP_FONT_TTF = 7 | HTTP_FILE_BINARY,
     HTTP_FONT_OTF = 8 | HTTP_FILE_BINARY,
+    HTTP_IMAGE_ICO = 9 | HTTP_FILE_BINARY,
     HTTP_KUCHBHI = -1
 } HTTPContentType;
 
@@ -41,13 +42,15 @@ std::map<std::string, HTTPContentType> file_formats {
     { ".txt", HTTP_PLAINTEXT },
     { ".json", HTTP_JSON },
     { ".html", HTTP_HTML },
+    { ".htm", HTTP_HTML },
     { ".js", HTTP_JS },
     { ".css", HTTP_CSS },
     { ".jpeg", HTTP_IMAGE_JPEG },
     { ".jpg", HTTP_IMAGE_JPEG },
+    { ".ico", HTTP_IMAGE_ICO },
     { ".png", HTTP_IMAGE_PNG },
     { ".ttf", HTTP_FONT_TTF },
-    { ".otf", HTTP_FONT_OTF }
+    { ".otf", HTTP_FONT_OTF },
 };
 
 std::map<int, std::string> content_type_strings = {
@@ -58,6 +61,7 @@ std::map<int, std::string> content_type_strings = {
     { HTTP_CSS, "text/css" },
     { HTTP_IMAGE_JPEG, "image/jpeg" },
     { HTTP_IMAGE_PNG, "image/png" },
+    { HTTP_IMAGE_ICO, "image/vnd.microsoft.icon" },
     { HTTP_FONT_TTF, "font/ttf" },
     { HTTP_FONT_OTF, "font/otf"}
 };
@@ -85,6 +89,7 @@ class HTTPResponse
 {
 public:
     std::vector<uint8_t> vbuf;
+    int code = 200;
 
     HTTPResponse()
     {
@@ -94,6 +99,7 @@ public:
     /* Generate an HTML / CSS / JS response */
     HTTPResponse(int status_code, HTTPContentType type, std::string content)
     {
+        this->code = status_code;
         std::string status_msg, content_type, response_str;
         int content_length = content.length();
         /* Get status message */
@@ -156,6 +162,30 @@ public:
     int length(void)
     {
         return this->vbuf.size();
+    }
+
+    void Display(void)
+    {
+        switch(this->code / 100)
+        {
+            case 2:
+                /* Green */
+                std::cout << "\x1B[32m";
+                break;
+            case 3:
+                /* Yellow */
+                std::cout << "\x1B[33m";
+                break;
+            case 4:
+                /* Red */
+                std::cout << "\x1B[31m";
+                break;
+            default:
+                break;
+        }
+
+        std::cout << "[HTTPResponse] " << this->code << " " << status_messages[this->code];
+        std::cout << "\x1B[39m" << std::endl;
     }
 
     ~HTTPResponse()
@@ -226,7 +256,7 @@ public:
 
     void Display(void)
     {
-        std::cout << "[HTTP] Method: " << str_from_method_map[this->method] << " Path: " << this->path << std::endl;
+        std::cout << "\x1B[94m[HTTPRequest] Method: " << str_from_method_map[this->method] << " Path: " << this->path << "\x1B[39m" << std::endl;
     }
 };
 
@@ -315,13 +345,14 @@ public:
             std::cout << "[NOTIFY] Alternatively, http://" << inet_ntoa(addr) << ":" << this->port << std::endl;
         }
         
-        std::cout << "*** Hit ^C (CTRL+C) to stop hosting anytime. ***" << std::endl;
+        std::cout << "\x1B[33m*** Hit ^C (CTRL+C) to stop hosting anytime. ***\x1B[39m" << std::endl;
         while (true)
         {
             SOCKET client = accept(this->listener_socket, NULL, NULL);
             char reply[MAX_REQUEST_SIZE] = { 0 };
             recv(client, reply, sizeof(reply), NULL);
             HTTPRequest request = HTTPRequest((const char*)&reply);
+            request.Display();
 
             if (client == SOCKET_ERROR)
             {
@@ -335,6 +366,7 @@ public:
                 {
                     response = callback(request);
                 }
+                response.Display();
                 send(client, (const char*)response.GetBuffer(), response.length(), NULL);
             }
             closesocket(client);
@@ -378,8 +410,6 @@ std::string PrintfToString(std::string format, ...)
 
 HTTPResponse SimpleHTTPServer(HTTPRequest request)
 {
-    request.Display();
-
     /* Only GET requests sir. */
     if(request.method != HTTP_GET)
     {
