@@ -31,7 +31,13 @@ The default port is 22344 which is ASCII-16 for WinHost's initials i.e. 'WH' ðŸ˜
 
 ## Screenshots
 
-|table>
-WinHost rendering its own README | File Browser |
-![](images/winhost-md.png) | ![](images/winhost-browse.png) |
-|<table
+<table>
+<thead>
+<th>WinHost rendering its own README</th>
+<th>File Browser</th>
+</thead>
+<tr>
+<td><img src="images/winhost-md.png"></td>
+<td><img src="images/winhost-browse.png"></td>
+</tr>
+</table>
