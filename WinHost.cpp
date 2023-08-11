@@ -1,6 +1,6 @@
 #pragma comment(lib, "Ws2_32.lib")
 
-#define WINHOST_VERSION_STRING "0.1.0"
+#define WINHOST_VERSION_STRING "0.2.5"
 #define WINHOST_CREDIT_STRING "(C) Siddharth Gautam, 2023. This software comes with NO WARRANTY"
 
 #include <iostream>
@@ -16,6 +16,8 @@
 #include <winsock2.h>
 #include <WS2tcpip.h>
 #include <tchar.h>
+
+#include "md-min.h"
 
 std::string PrintfToString(std::string format, ...);
 void WinHostQuit(int err_code);
@@ -35,6 +37,7 @@ typedef enum
     HTTP_FONT_TTF = 7 | HTTP_FILE_BINARY,
     HTTP_FONT_OTF = 8 | HTTP_FILE_BINARY,
     HTTP_IMAGE_ICO = 9 | HTTP_FILE_BINARY,
+    NONHTTP_DOC_MD = 10,
     HTTP_KUCHBHI = -1
 } HTTPContentType;
 
@@ -51,6 +54,7 @@ std::map<std::string, HTTPContentType> file_formats {
     { ".png", HTTP_IMAGE_PNG },
     { ".ttf", HTTP_FONT_TTF },
     { ".otf", HTTP_FONT_OTF },
+    { ".md", NONHTTP_DOC_MD }
 };
 
 std::map<int, std::string> content_type_strings = {
@@ -467,7 +471,65 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
         std::stringstream buffer;
         buffer << stream.rdbuf();
         stream.close();
-        return HTTPResponse(200, type, buffer.str());
+
+        if(type != NONHTTP_DOC_MD)
+        {
+            return HTTPResponse(200, type, buffer.str());
+        }
+        else
+        {
+            /* Return MD parsed file */
+            std::shared_ptr<maddy::ParserConfig> config = std::make_shared<maddy::ParserConfig>();
+            config->enabledParsers &= ~maddy::types::EMPHASIZED_PARSER;
+            config->enabledParsers |= maddy::types::HTML_PARSER;
+            /* Enable LaTeX */
+            config->enabledParsers |= maddy::types::LATEX_BLOCK_PARSER;
+
+            std::shared_ptr<maddy::Parser> parser = std::make_shared<maddy::Parser>(config);
+            std::string html_output = parser->Parse(buffer);
+            /* Include basic HTML header */
+            std::string html_output_before = "<!DOCTYPE html>"
+                                            "<html>"
+                                            "<head>"
+                                            "<meta \"charset\"=\"UTF-8\""
+                                            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+                                            "<title>" + request.path + "</title>"
+                                            /* Include GitHub's markdown */
+                                            "<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.css\"/>"
+                                            "<style>"
+                                            /* Markdown Style */
+                                            ".markdown-body"
+                                            "{"
+                                            "box-sizing: border-box;"
+                                            "min-width: 200px;"
+                                            "max-width: 980px;"
+                                            "margin: 0 auto;"
+                                            "padding: 45px;"
+                                            "}"
+
+                                            "@media (max-width: 767px)"
+                                            "{"
+                                            ".markdown-body"
+                                            "{"
+                                            "padding: 15px;"
+                                            "}"
+                                            "}"
+                                            "</style>"
+                                            "</head>"
+                                            "<body>"
+                                            "<article class=\"markdown-body\">";
+
+            std::string html_output_after = "</article>"
+                                            /* Include MathJAX */
+                                            "<script src=\"https://polyfill.io/v3/polyfill.min.js?features=es6\"></script>"
+                                            "<script id=\"MathJax-script\" async src=\"https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js\"></script>"
+                                            "</body>"
+                                            "</html>";
+            
+
+
+            return HTTPResponse(200, HTTP_HTML, html_output_before + html_output + html_output_after);
+        }
     }
 }
 
