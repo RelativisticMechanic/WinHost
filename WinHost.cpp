@@ -1,6 +1,6 @@
 #pragma comment(lib, "Ws2_32.lib")
 
-#define WINHOST_VERSION_STRING "0.0.2"
+#define WINHOST_VERSION_STRING "0.1.0"
 #define WINHOST_CREDIT_STRING "(C) Siddharth Gautam, 2023. This software comes with NO WARRANTY"
 
 #include <iostream>
@@ -234,6 +234,7 @@ public:
 HTTPResponse ResponseBadRequest(400, HTTP_HTML, "<h2>400: Bad Request</h2><p>That's not something we expected.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
 HTTPResponse ResponseForbidden(403, HTTP_HTML, "<h2>403: Forbidden</h2><p>You aren't supposed to access this.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
 HTTPResponse ResponseNotFound = HTTPResponse(404, HTTP_HTML, "<h2>404: Not found</h2><p>The file was not found on this server.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
+HTTPResponse ResponseUnsupportedMethod = HTTPResponse(405, HTTP_HTML, "<h2>405: Method Not Allow</h2><p>This is a simple HTTP web server. It only accepts GET requests.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
 HTTPResponse ResponseWinHostDefault = HTTPResponse(200, HTTP_HTML, "<h2>Hello from WinHost!</h2><p>If you are seeing this message, that means WinHost is running!</p>");
 
 typedef HTTPResponse (*HTTPCallBack)(HTTPRequest);
@@ -245,8 +246,6 @@ public:
     SOCKET listener_socket = INVALID_SOCKET;
     WSADATA winsock_data;
 
-    int local_ip[4];
-
     HTTPConnection(int port)
     {
         this->port = port;
@@ -256,25 +255,6 @@ public:
             std::cerr << "[ERROR] winsock 2.2 failed to initialize. WS2_Error_Code: " << WSAGetLastError() << std::endl;
             WinHostQuit(-1);
         }
-
-        /* Get IP on local network */
-        char ipbuf[1024];
-        if(gethostname(ipbuf, sizeof(ipbuf)) == SOCKET_ERROR)
-        {
-            std::cerr << "[ERROR] gethostname() failed" << std::endl;
-            WinHostQuit(-1);
-        }
-        struct hostent* host = gethostbyname(ipbuf);
-        if(host == NULL)
-        {
-            std::cerr << "[ERROR] gethostbyname() failed" << std::endl;
-            WinHostQuit(-1);
-        }
-
-        local_ip[0] = ((struct in_addr *)(host->h_addr))->S_un.S_un_b.s_b1;
-        local_ip[1] = ((struct in_addr *)(host->h_addr))->S_un.S_un_b.s_b2;
-        local_ip[2] = ((struct in_addr *)(host->h_addr))->S_un.S_un_b.s_b3;
-        local_ip[3] = ((struct in_addr *)(host->h_addr))->S_un.S_un_b.s_b4;
 
         struct addrinfo* result = NULL, * ptr = NULL, hints;
         ZeroMemory(&hints, sizeof(hints));
@@ -314,7 +294,28 @@ public:
     {
 
         std::cout << "[NOTIFY] WinHost is listening on: http://localhost:" << this->port << std::endl;
-        std::cout << "[NOTIFY] Alternatively, http://" << local_ip[0] << "." << local_ip[1] << "." << local_ip[2] << "." << local_ip[3] << ":" << this->port << std::endl;
+        /* Get IP on local network */
+        char ipbuf[1024];
+        if(gethostname(ipbuf, sizeof(ipbuf)) == SOCKET_ERROR)
+        {
+            std::cerr << "[ERROR] gethostname() failed" << std::endl;
+            WinHostQuit(-1);
+        }
+        struct hostent* host_entries = gethostbyname(ipbuf);
+        if(host_entries == NULL)
+        {
+            std::cerr << "[ERROR] gethostbyname() failed" << std::endl;
+            WinHostQuit(-1);
+        }
+
+        for(int i = 0; host_entries->h_addr_list[i] != 0; i++)
+        {
+            struct in_addr addr;
+            memcpy(&addr, host_entries->h_addr_list[i], sizeof(struct in_addr));
+            std::cout << "[NOTIFY] Alternatively, http://" << inet_ntoa(addr) << ":" << this->port << std::endl;
+        }
+        
+        std::cout << "*** Hit ^C (CTRL+C) to stop hosting anytime. ***" << std::endl;
         while (true)
         {
             SOCKET client = accept(this->listener_socket, NULL, NULL);
@@ -377,10 +378,14 @@ std::string PrintfToString(std::string format, ...)
 
 HTTPResponse SimpleHTTPServer(HTTPRequest request)
 {
-    HTTPContentType type = HTTP_KUCHBHI;
     request.Display();
 
-    /* Default to index.html */
+    /* Only GET requests sir. */
+    if(request.method != HTTP_GET)
+    {
+        return ResponseUnsupportedMethod;
+    }
+    /* Default / => index.html */
     if (request.path == "/")
     {
         request.path = "index.html";
@@ -389,6 +394,7 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
     std::string path = "./" + request.path;
     
     /* Get file format */
+    HTTPContentType type = HTTP_KUCHBHI;
     for (auto i = file_formats.begin(); i != file_formats.end(); i++)
     {
         if (endsWith(path, i->first))
@@ -437,7 +443,8 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
 
 int main(int argc, const char* argv)
 {
-    int port = 8888;
+    // 8772 = 'WH' aka WinHost
+    uint16_t port = 'WH';
     std::cout << "WinHost, version: " << WINHOST_VERSION_STRING << std::endl;
     std::cout << WINHOST_CREDIT_STRING << std::endl;
     HTTPConnection connection = HTTPConnection(port);

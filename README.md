@@ -4,7 +4,17 @@ A utility written in C++ using Windows sockets that acts as a simple HTTP server
 
 ## Description
 
-When you run this program from a directory, it will begin serving web pages on your localhost. 
+When you run this program from a directory, it will begin serving web pages on your localhost:22344 (0x5748 = 'WH') as well as the LAN. It *only* supports GET requests. Everything else will result in 405 Method Not Allowed. It also only serves the following file formats:
+
+- HTML (.html)
+- CSS (.css)
+- Javascript (.js)
+- JPEG/PNG (.jpeg, .jpg, .png)
+- TrueType/OpenType Fonts (.ttf, .otf)
+- Text Files (.txt)
+- JSON files (.json)
+
+Anything else will result in a 403 Forbidden.
 
 ## Usage
 
