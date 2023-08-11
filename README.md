@@ -19,6 +19,10 @@ When you run this program from a directory, it will begin serving web pages on y
 
 Anything else will result in a 403 Forbidden.
 
+It also comes with an inbuilt filebrowser.
+
+FYI, it utilizes Bootstrap 5 for its UI, ever expected Bootstrap code inside a C++ program? Now, isn't that cool?
+
 ## Usage
 
 Simply compile using build-winhost.bat, you may need to edit the path of your vcvars64.bat which sets the environment variables for MSVC.

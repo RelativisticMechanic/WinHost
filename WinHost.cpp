@@ -1,6 +1,6 @@
 #pragma comment(lib, "Ws2_32.lib")
 
-#define WINHOST_VERSION_STRING "0.2.5"
+#define WINHOST_VERSION_STRING "0.3.1"
 #define WINHOST_CREDIT_STRING "(C) Siddharth Gautam, 2023. This software comes with NO WARRANTY"
 
 #include <iostream>
@@ -17,6 +17,9 @@
 #include <WS2tcpip.h>
 #include <tchar.h>
 
+#include <atlbase.h>
+#include <atlconv.h>
+
 #include "md-min.h"
 
 std::string PrintfToString(std::string format, ...);
@@ -24,6 +27,20 @@ void WinHostQuit(int err_code);
 
 #define MAX_REQUEST_SIZE 3000
 #define HTTP_FILE_BINARY 0b100000000
+
+#define WINHOST_HTML_HEADER "<!DOCTYPE html>"\
+"<html>"\
+"<head>"\
+"<meta charset=\"UTF-8\">"\
+"<title>WinHost " WINHOST_VERSION_STRING "</title>"\
+"<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css\" rel=\"stylesheet\">"\
+"<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css\"/>"\
+"</head>"\
+"<body>"
+
+#define WINHOST_HTML_FOOTER "<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js\"></script>"\
+"</body>"\
+"</html>"
 
 typedef enum
 {
@@ -206,6 +223,12 @@ public:
 class HTTPRequest
 {
 public:
+    typedef enum
+    {
+        PARSER_STATE_NORMAL,
+        PARSER_STATE_PROCESSING_ASCII
+    } HTTP_REQUEST_PARSER_STATE;
+
     std::map<std::string, HTTPRequestMethod> method_from_str_map = {
         { "GET", HTTP_GET },
         { "POST", HTTP_POST },
@@ -234,6 +257,11 @@ public:
     HTTPRequestMethod method = HTTP_UNKNOWN;
     std::string path = "";
 
+
+    int ascii_chars_left = 0;
+    char ascii_char = 0;
+
+    HTTP_REQUEST_PARSER_STATE parser_state = PARSER_STATE_NORMAL;
     HTTPRequest(const char* response_str)
     {
         int cursor = 0;
@@ -242,22 +270,41 @@ public:
         /* Format of an HTTP Request: Method<SPACE>Path<HTTP Version> */
         while (cursor < strlen(response_str))
         {
-            if (response_str[cursor] == '\n')
+            /* Are we processing an ASCII character prefixed with a '%'? */
+            if(parser_state == PARSER_STATE_PROCESSING_ASCII)
             {
-                if (current_token.length())
+                ascii_chars_left -= 1;
+                ascii_char = ascii_char | ((response_str[cursor] - '0') << (4 * ascii_chars_left)); 
+                if(ascii_chars_left <= 0)
+                {
+                    parser_state = PARSER_STATE_NORMAL;
+                    current_token += ascii_char;
+                }
+            }
+            else 
+            {
+                if (response_str[cursor] == '\n')
+                {
+                    if (current_token.length())
+                        tokens.push_back(current_token);
+                    break;
+                }
+                else if (response_str[cursor] == ' ')
+                {
                     tokens.push_back(current_token);
-                break;
+                    current_token = "";
+                }
+                else if(response_str[cursor] == '%')
+                {
+                    parser_state = PARSER_STATE_PROCESSING_ASCII;
+                    ascii_chars_left = 2;
+                    ascii_char = 0;
+                }
+                else
+                {
+                    current_token += response_str[cursor];
+                }
             }
-            else if (response_str[cursor] == ' ')
-            {
-                tokens.push_back(current_token);
-                current_token = "";
-            }
-            else
-            {
-                current_token += response_str[cursor];
-            }
-
             cursor += 1;
         }
 
@@ -280,11 +327,16 @@ public:
 };
 
 /* Some basic responses */
-HTTPResponse ResponseBadRequest(400, HTTP_HTML, "<h2>400: Bad Request</h2><p>That's not something we expected.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
-HTTPResponse ResponseForbidden(403, HTTP_HTML, "<h2>403: Forbidden</h2><p>You aren't supposed to access this.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
-HTTPResponse ResponseNotFound = HTTPResponse(404, HTTP_HTML, "<h2>404: Not found</h2><p>The file was not found on this server.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
-HTTPResponse ResponseUnsupportedMethod = HTTPResponse(405, HTTP_HTML, "<h2>405: Method Not Allow</h2><p>This is a simple HTTP web server. It only accepts GET requests.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>");
-HTTPResponse ResponseWinHostDefault = HTTPResponse(200, HTTP_HTML, "<h2>Hello from WinHost!</h2><p>If you are seeing this message, that means WinHost is running!</p>");
+HTTPResponse ResponseBadRequest(400, HTTP_HTML, WINHOST_HTML_HEADER "<h2>400: Bad Request</h2><p>That's not something we expected.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>" WINHOST_HTML_FOOTER);
+HTTPResponse ResponseForbidden(403, HTTP_HTML, WINHOST_HTML_HEADER "<h2>403: Forbidden</h2><p>You aren't supposed to access this.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>" WINHOST_HTML_FOOTER);
+HTTPResponse ResponseNotFound = HTTPResponse(404, HTTP_HTML, WINHOST_HTML_HEADER "<h2>404: Not found</h2><p>The file was not found on this server.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>" WINHOST_HTML_FOOTER);
+HTTPResponse ResponseUnsupportedMethod = HTTPResponse(405, HTTP_HTML, WINHOST_HTML_HEADER "<h2>405: Method Not Allow</h2><p>This is a simple HTTP web server. It only accepts GET requests.</p><i>Running WinHost " WINHOST_VERSION_STRING "</i>" WINHOST_HTML_FOOTER);
+
+/* The index page */
+HTTPResponse ResponseWinHostDefault = HTTPResponse(200, HTTP_HTML, WINHOST_HTML_HEADER "<head><title>WinHost Index Page</title></head>"
+                                                                    "<h2>Hello from WinHost!</h2>"
+                                                                    "<p>If you are seeing this message, that means WinHost is running! Please add an index.html to the directory.</p>"
+                                                                    "<i>Running WinHost " WINHOST_VERSION_STRING "</i>" WINHOST_HTML_FOOTER);
 
 typedef HTTPResponse (*HTTPCallBack)(HTTPRequest);
 
@@ -429,6 +481,58 @@ std::string PrintfToString(std::string format, ...)
     return result_cpp;
 }
 
+HTTPResponse SimpleFileBrowser(std::string path)
+{
+    std::filesystem::path current_dir = std::filesystem::path("." + path);
+
+    /* Check if directory exists */
+    if(!std::filesystem::exists(current_dir))
+    {
+        return ResponseNotFound;
+    }
+
+    /* Check if it is a directory */
+    if(!std::filesystem::is_directory(current_dir))
+    {
+        return ResponseForbidden;
+    }
+
+    /* HTML Filebrowser */
+    std::string filebrowser_html = "<div class=\"container my-5\">"
+    "<h3>Browsing index of: " + path + "</h3>" 
+    "<table class=\"table shadow-lg\">";
+
+    filebrowser_html += "<tr><td><a href=\"/" + (current_dir.parent_path()).parent_path().string() + "/\">..</td></a><td></td></tr>";
+
+    for (const auto & entry : std::filesystem::directory_iterator(current_dir))
+    {
+        std::filesystem::path file_path = entry.path();
+        std::string file_size;
+        /* Font-Awesome Icon for the path */
+        std::string path_icon = "fa-file";
+        std::string path_url = file_path.string();
+        /* Remove leading dot from path */
+        path_url.erase(0, 1);
+        /* If directory, add a slash */
+        if(std::filesystem::is_directory(file_path))
+        {
+            path_url += "/";
+            path_icon = "fa-folder";
+            /* Don't report file sizes for dirs */
+            file_size = "";
+        }
+        else
+        {
+            file_size = std::to_string(std::filesystem::file_size(file_path)) + " bytes";
+        }
+        filebrowser_html += "<tr><td><span class=\"fa " + path_icon + "\"></span> " + "<a href=\"" + path_url + "\">" + file_path.filename().string() + "</a></td><td>" +  file_size + "</td></tr>";
+    }
+
+    filebrowser_html += "</table><i>Running WinHost " WINHOST_VERSION_STRING "</i></div>";
+
+    return HTTPResponse(200, HTTP_HTML, WINHOST_HTML_HEADER + filebrowser_html + WINHOST_HTML_FOOTER);
+}
+
 HTTPResponse SimpleHTTPServer(HTTPRequest request)
 {
     /* Only GET requests sir. */
@@ -442,8 +546,15 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
         request.path = "index.html";
     }
 
-    std::string path = "./" + request.path;
-    
+    /* Check if it is a directory */
+    if(endsWith(request.path, "/"))
+    {
+        /* Open the filebrowser */
+        return SimpleFileBrowser(request.path);
+    }
+
+    std::string path = "." + request.path;
+
     /* Get file format */
     HTTPContentType type = HTTP_KUCHBHI;
     for (auto i = file_formats.begin(); i != file_formats.end(); i++)
@@ -469,6 +580,10 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
 
     if (stream.fail())
     {
+        /* If we failed for index.html return the default index page. */
+        if(request.path == "index.html")
+            return ResponseWinHostDefault;
+
         return ResponseNotFound;
     }
 
