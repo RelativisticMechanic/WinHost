@@ -481,9 +481,9 @@ std::string PrintfToString(std::string format, ...)
     return result_cpp;
 }
 
-HTTPResponse SimpleFileBrowser(std::string path)
+HTTPResponse SimpleFileBrowser(HTTPRequest request)
 {
-    std::filesystem::path current_dir = std::filesystem::path("." + path);
+    std::filesystem::path current_dir = std::filesystem::path("." + request.path);
 
     /* Check if directory exists */
     if(!std::filesystem::exists(current_dir))
@@ -497,9 +497,15 @@ HTTPResponse SimpleFileBrowser(std::string path)
         return ResponseForbidden;
     }
 
+    if(request.method == HTTP_HEAD)
+    {
+        /* Return OK */
+        return HTTPResponse(200, HTTP_HTML, "");
+    }
+
     /* HTML Filebrowser */
     std::string filebrowser_html = "<div class=\"container my-5\">"
-    "<h3>Browsing index of: " + path + "</h3>" 
+    "<h3>Browsing index of: " + request.path + "</h3>" 
     "<table class=\"table shadow-lg\">";
 
     filebrowser_html += "<tr><td><a href=\"/" + (current_dir.parent_path()).parent_path().string() + "/\">..</td></a><td></td></tr>";
@@ -550,7 +556,7 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
     if(endsWith(request.path, "/"))
     {
         /* Open the filebrowser */
-        return SimpleFileBrowser(request.path);
+        return SimpleFileBrowser(request);
     }
 
     std::string path = "." + request.path;
