@@ -1,15 +1,18 @@
 #pragma comment(lib, "Ws2_32.lib")
 
-#define WINHOST_VERSION_STRING "0.3.1"
+#define WINHOST_VERSION_STRING "0.3.5"
 #define WINHOST_CREDIT_STRING "(C) Siddharth Gautam, 2023. This software comes with NO WARRANTY"
 
 #include <iostream>
+#include <array>
 #include <vector>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <map>
+#include <regex>
+#include <cstdio>
 #include <cassert>
 #include <csignal>
 
@@ -23,6 +26,7 @@
 #include "md-min.h"
 
 std::string PrintfToString(std::string format, ...);
+std::vector<std::string> SplitString(const std::string str, const std::string regex_str);
 void WinHostQuit(int err_code);
 
 #define MAX_REQUEST_SIZE 3000
@@ -55,6 +59,7 @@ typedef enum
     HTTP_FONT_OTF = 8 | HTTP_FILE_BINARY,
     HTTP_IMAGE_ICO = 9 | HTTP_FILE_BINARY,
     NONHTTP_DOC_MD = 10,
+    NONHTTP_DOC_PY = 11,
     HTTP_KUCHBHI = -1
 } HTTPContentType;
 
@@ -71,7 +76,8 @@ std::map<std::string, HTTPContentType> file_formats {
     { ".png", HTTP_IMAGE_PNG },
     { ".ttf", HTTP_FONT_TTF },
     { ".otf", HTTP_FONT_OTF },
-    { ".md", NONHTTP_DOC_MD }
+    { ".md", NONHTTP_DOC_MD },
+    { ".html.py", NONHTTP_DOC_PY }
 };
 
 std::map<int, std::string> content_type_strings = {
@@ -226,7 +232,7 @@ public:
     typedef enum
     {
         PARSER_STATE_NORMAL,
-        PARSER_STATE_PROCESSING_ASCII
+        PARSER_STATE_PROCESSING_ASCII,
     } HTTP_REQUEST_PARSER_STATE;
 
     std::map<std::string, HTTPRequestMethod> method_from_str_map = {
@@ -262,11 +268,16 @@ public:
     char ascii_char = 0;
 
     HTTP_REQUEST_PARSER_STATE parser_state = PARSER_STATE_NORMAL;
+    std::map<std::string, std::string> params;
+
     HTTPRequest(const char* response_str)
     {
         int cursor = 0;
         std::vector<std::string> tokens;
         std::string current_token = "";
+        /* Whether this HTTP request has parameters */
+        bool has_params = false;
+
         /* Format of an HTTP Request: Method<SPACE>Path<HTTP Version> */
         while (cursor < strlen(response_str))
         {
@@ -300,6 +311,13 @@ public:
                     ascii_chars_left = 2;
                     ascii_char = 0;
                 }
+                else if(response_str[cursor] == '?')
+                {
+                    /* Okay, there are parameters */
+                    has_params = true;
+                    tokens.push_back(current_token);
+                    current_token = "";
+                }
                 else
                 {
                     current_token += response_str[cursor];
@@ -318,11 +336,30 @@ public:
             /* Get path */
             this->path = std::string(tokens[1]);
         }
+
+        if(has_params && tokens.size() >= 3)
+        {
+            /* GET URL?PARAM1=VAL1&PARAM2=VAL2 etc. */
+            std::vector<std::string> params_separated = SplitString(tokens[2], "&");
+            for(auto param_statement : params_separated)
+            {
+                std::vector<std::string> param_and_val = SplitString(param_statement, "=");
+                if(param_and_val.size() == 2)
+                {
+                    this->params[param_and_val[0]] = param_and_val[1];
+                }
+            }
+        }
     }
 
     void Display(void)
     {
-        std::cout << "\x1B[94m[HTTPRequest] Method: " << str_from_method_map[this->method] << " Path: " << this->path << "\x1B[39m" << std::endl;
+        std::cout << "\x1B[94m[HTTPRequest] Method: " << str_from_method_map[this->method] << " Path: " << this->path << "\x1B[39m ";
+        for(auto param : this->params)
+        {
+            std::cout << param.first << "=" << param.second << " ";
+        }
+        std::cout << std::endl;
     }
 };
 
@@ -481,6 +518,32 @@ std::string PrintfToString(std::string format, ...)
     return result_cpp;
 }
 
+std::vector<std::string> SplitString(const std::string str, const std::string regex_str)
+{
+    std::regex regexz(regex_str);
+    std::vector<std::string> list(std::sregex_token_iterator(str.begin(), str.end(), regexz, -1),
+                                  std::sregex_token_iterator());
+    return list;
+}
+
+std::string ExecuteProgram(std::string command)
+{
+    std::array<char, 128> output_buffer;
+    std::string total_output;
+    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(command.c_str(), "r"), _pclose);
+    if(!pipe)
+    {
+        std::cout << "\x1B[31m" << "Failed to execute: " << command << "\x1B[39m" << std::endl;
+        return "Unable to execute program: " + command + ". Ensure it is available on the server."; 
+    }
+
+    while(fgets(output_buffer.data(), output_buffer.size(), pipe.get()))
+    {
+        total_output += output_buffer.data();
+    }
+
+    return total_output;
+}
 HTTPResponse SimpleFileBrowser(HTTPRequest request)
 {
     std::filesystem::path current_dir = std::filesystem::path("." + request.path);
@@ -537,6 +600,33 @@ HTTPResponse SimpleFileBrowser(HTTPRequest request)
     filebrowser_html += "</table><i>Running WinHost " WINHOST_VERSION_STRING "</i></div>";
 
     return HTTPResponse(200, HTTP_HTML, WINHOST_HTML_HEADER + filebrowser_html + WINHOST_HTML_FOOTER);
+}
+
+HTTPResponse ExecutePython(HTTPRequest request)
+{
+    /* Check if python file exists */
+    std::filesystem::path python_file = std::filesystem::path("." + request.path);
+    if(!std::filesystem::exists(python_file))
+    {
+        return ResponseNotFound;
+    }
+    
+    /* Create a JSON to pass all the paramters as argument */
+    std::string params_JSON = "";
+    /* Escape parameters */
+    for(auto param : request.params)
+    {
+        params_JSON += "\\\"" + param.first + "\\\": \\\"" + param.second + "\\\",";
+    }
+    /* Remove comma */
+    if(params_JSON.length() > 1)
+        params_JSON.pop_back();
+
+    /* Add brackets */
+    params_JSON = "\"{" + params_JSON + "}\""; 
+    std::string python_cmd = "python ." + request.path + " " + params_JSON; 
+    std::cout << "\x1B[34m[SYSTEM] Executing " << python_cmd << "\x1B[39m" << std::endl;
+    return HTTPResponse(200, HTTP_HTML, ExecuteProgram(python_cmd));
 }
 
 HTTPResponse SimpleHTTPServer(HTTPRequest request)
@@ -614,11 +704,7 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
         buffer << stream.rdbuf();
         stream.close();
 
-        if(type != NONHTTP_DOC_MD)
-        {
-            return HTTPResponse(200, type, buffer.str());
-        }
-        else
+        if(type == NONHTTP_DOC_MD)
         {
             /* Return MD parsed file */
             std::shared_ptr<maddy::ParserConfig> config = std::make_shared<maddy::ParserConfig>();
@@ -671,6 +757,15 @@ HTTPResponse SimpleHTTPServer(HTTPRequest request)
 
 
             return HTTPResponse(200, HTTP_HTML, html_output_before + html_output + html_output_after);
+            
+        }
+        else if(type == NONHTTP_DOC_PY)
+        {
+            return ExecutePython(request);
+        }
+        else
+        {
+            return HTTPResponse(200, type, buffer.str());
         }
     }
 }
