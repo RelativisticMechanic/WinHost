@@ -16,7 +16,7 @@ When you run this program from a directory, it will begin serving web pages on y
 - Icon files (.ico)
 - Markdown (.md), renders to HTML with MathJAX, so you can do cool stuff like: 
     $$ \frac{x^2}{2x + 6} = \sin{x} $$
-- Python Code (.html.py), renders the stdout as html, see test.py.html for an example.
+- Python Code (.html.py), renders the stdout as html, see test.html.py for an example.
 
 Anything else will result in a 403 Forbidden.
 
